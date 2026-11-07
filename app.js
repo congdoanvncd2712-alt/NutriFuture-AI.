@@ -1,178 +1,535 @@
-/* NutriFuture — toàn bộ logic chạy trên trình duyệt (phù hợp GitHub Pages) */
-const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-const F=window.NF_FOODS.map(r=>({id:r[0],n:r[1],p:r[2],k:r[3],pr:r[4],f:r[5],c:r[6],reg:r[7],prov:r[8],al:r[9]}));
-const L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},W=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
-const norm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').trim();
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const today=()=>new Date().toISOString().slice(0,10),week=()=>{const d=new Date();d.setDate(d.getDate()-((d.getDay()+6)%7));return d.toISOString().slice(0,10)};
-const fmt=n=>Math.round(n).toLocaleString('vi-VN');
-function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600)}
+/* NutriFuture – chạy hoàn toàn phía trình duyệt (phù hợp GitHub Pages) */
+'use strict';
 
-/* ---------- Điều hướng: 6 tính năng ---------- */
-const FEATS=[['f1','🧑‍🎓','Hồ sơ & dị ứng','Nhập thông tin cá nhân, tính BMI, nhu cầu calo và nước. Lưu hồ sơ dị ứng để bảo vệ bạn.'],
-['f2','🔎','Tra cứu dinh dưỡng','Tìm nhanh 253 món ba miền, chọn khẩu phần S/M/L và nhận cảnh báo dị ứng ngay.'],
-['f3','📷','Nhận diện bằng AI','Chụp ảnh món ăn, AI Gemini phân tích thành phần dinh dưỡng và cảnh báo kép.'],
-['f4','🥗','Thực đơn khoa học','Gợi ý 3 bữa cân đối theo nhu cầu của bạn, đổi thực đơn khác chỉ với một chạm.'],
-['f5','📒','Nhật ký & theo dõi','Biểu đồ vòng so calo với mục tiêu, phân tích Carb – Đạm – Béo, sao lưu JSON.'],
-['f6','🎮','Học mà chơi','Điểm thưởng, chuỗi ngày, câu đố mỗi ngày, huy hiệu và 9 giao diện sưu tầm.']];
-const NAV=['Hồ sơ & dị ứng','Tra cứu','Camera AI','Thực đơn','Nhật ký','Học mà chơi'];
-$('#nav').innerHTML=FEATS.map((f,i)=>`<button data-s="${f[0]}">${f[1]} ${NAV[i]}</button>`).join('');
-$('#feats').innerHTML=FEATS.map(f=>`<div class="card feat" onclick="go('${f[0]}')"><div class="ic">${f[1]}</div><h3>${f[2]}</h3><p>${f[3]}</p></div>`).join('');
-$$('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.s));
-function go(id){$$('section').forEach(s=>s.classList.toggle('on',s.id===id));$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.s===id));
- location.hash=id==='home'?'':id;scrollTo({top:0,behavior:'smooth'});({f1:fillProfile,f4:()=>$('#menu').innerHTML||genMenu(),f5:renderDiary,f6:renderGame})[id]?.()}
-addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(h&&$('#'+h))go(h)});
+/* ================= Tiện ích ================= */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const norm = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().trim();
+const fmt = (n, d = 0) => Number(n).toLocaleString('vi-VN', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+const round1 = n => Math.round(n * 10) / 10;
+const dayKey = (d = new Date()) => d.toLocaleDateString('sv-SE');
+const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2600); };
 
-/* ---------- 1. Hồ sơ & dị ứng ---------- */
-const ALG=['đậu phộng','hải sản','sữa','trứng','gluten','đậu nành'];let myAlg=[];
-const P=()=>L('nf_profile',null);
-function calc(p){const bmr=10*p.w+6.25*p.h-5*p.a+(p.s==='m'?5:-161),bmi=p.w/((p.h/100)**2);
- return{bmi,kcal:Math.round(bmr*p.v/50)*50,water:p.w*33/1000,cat:bmi<18.5?'Thiếu cân':bmi<23?'Bình thường':bmi<25?'Thừa cân nhẹ':'Thừa cân'}}
-function renderAlg(){$('#alg').innerHTML=ALG.map(a=>`<button class="chip ${myAlg.includes(a)?'on':''}" data-a="${a}">${a}</button>`).join('');
- $$('#alg .chip').forEach(c=>c.onclick=()=>{const a=c.dataset.a;myAlg=myAlg.includes(a)?myAlg.filter(x=>x!==a):[...myAlg,a];renderAlg()})}
-function fillProfile(){const p=P();if(p){$('#pn').value=p.n;$('#pa').value=p.a;$('#ps').value=p.s;$('#pv').value=p.v;$('#ph').value=p.h;$('#pw').value=p.w;myAlg=p.al||[];$('#pc').value=(p.custom||[]).join(', ');showRes(p)}renderAlg()}
-function showRes(p){const r=calc(p);$('#pres').innerHTML=`<div><b>${r.bmi.toFixed(1)}</b><span>BMI · ${r.cat}</span></div><div><b>${fmt(r.kcal)}</b><span>kcal/ngày</span></div><div><b>${r.water.toFixed(1)}</b><span>lít nước/ngày</span></div>`;
- $('#pnote').innerHTML=p.al?.length||p.custom?.length?`🛡 Đã lưu dị ứng: <b>${esc([...p.al,...(p.custom||[])].join(', '))}</b>. NutriFuture sẽ cảnh báo khi tra cứu và quét món ăn.`:'Bạn chưa khai báo dị ứng. Hãy chọn nếu có để được bảo vệ.'}
-function saveProfile(){const p={n:$('#pn').value.trim().slice(0,40),a:+$('#pa').value,s:$('#ps').value,v:+$('#pv').value,h:+$('#ph').value,w:+$('#pw').value,al:myAlg,custom:$('#pc').value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean)};
- if(!(p.a>=15&&p.a<=22))return toast('Tuổi cần từ 15 đến 22');if(!(p.h>=120&&p.h<=220))return toast('Chiều cao cần từ 120 đến 220 cm');if(!(p.w>=30&&p.w<=150))return toast('Cân nặng cần từ 30 đến 150 kg');
- W('nf_profile',p);showRes(p);toast('Đã lưu hồ sơ');award('profile',20)}
-const target=()=>{const p=P();return p?calc(p).kcal:2200};
-/* cảnh báo dị ứng: nhóm (món trong CSDL) hoặc từ khóa (kết quả AI) */
-function warn(name,groups=[],text=''){const p=P();if(!p)return[];const hit=new Set(),t=norm(name+' '+text);
- (p.al||[]).forEach(a=>{if(groups.includes(a))hit.add(a)});
- [...(p.al||[]),...(p.custom||[])].forEach(a=>{if(t.includes(norm(a)))hit.add(a)});
- if(text&&(p.al||[]).includes('đậu phộng')&&/lạc|đậu phộng|peanut/.test(t))hit.add('đậu phộng');return[...hit]}
-const alertHTML=h=>h.length?`<div class="alert">⚠️ Cảnh báo: món này có chứa ${esc(h.join(', '))}!</div>`:'';
+const ALLERGENS = ['Đậu phộng', 'Tôm, cua', 'Nhuyễn thể', 'Cá', 'Trứng', 'Sữa', 'Đậu nành', 'Gluten', 'Mè'];
 
-/* ---------- 2. Tra cứu ---------- */
-let cur=null,size=1;const SZ={S:.7,M:1,L:1.3};
-$('#q').addEventListener('input',e=>{const v=norm(e.target.value);if(!v){$('#sug').innerHTML='';return}
- const m=F.filter(f=>norm(f.n).includes(v)).slice(0,30);
- $('#sug').innerHTML=m.length?`<div class="sug">${m.map(f=>`<div data-i="${f.id}"><span>${esc(f.n)}</span><small>${f.k} kcal</small></div>`).join('')}</div>`:`<div class="sug"><div data-ai="1">Không có trong CSDL — hỏi AI về “${esc(e.target.value)}”</div></div>`;
- $$('#sug [data-i]').forEach(d=>d.onclick=()=>pick(+d.dataset.i));$$('#sug [data-ai]').forEach(d=>d.onclick=()=>aiLookup(e.target.value))});
-$('#q').addEventListener('keydown',e=>{if(e.key==='Enter'){const f=F.find(x=>norm(x.n)===norm(e.target.value))||F.find(x=>norm(x.n).includes(norm(e.target.value)));f?pick(f.id):aiLookup(e.target.value)}});
-function advice(f){const a=[];if(f.k>=550)a.push('Món khá nhiều năng lượng, nên chia sẻ hoặc ăn kèm rau xanh.');else if(f.k<=200)a.push('Món nhẹ, hãy bổ sung thêm đạm hoặc tinh bột để đủ no.');
- if(f.f>=25)a.push('Lượng béo cao, hạn chế ăn thường xuyên.');if(f.pr>=25)a.push('Giàu đạm, tốt cho cơ bắp và tăng trưởng.');if(f.c>=70)a.push('Nhiều tinh bột, cân đối bằng rau và đạm.');
- if(/trà sữa|chè|bánh pía|kẹo/i.test(f.n)||f.c>=65&&f.pr<8)a.push('Nhiều đường, nên uống ít đường hoặc chia nhỏ khẩu phần.');return a.length?a.join(' '):'Khẩu phần hợp lý, ăn kèm rau và trái cây để đủ vitamin và khoáng chất.'}
-function pick(id){cur=F.find(f=>f.id===id);size=1;$('#sug').innerHTML='';$('#q').value=cur.n;drawFood();award('look',3,5)}
-function drawFood(){const f=cur,s=size,h=warn(f.n,f.al);
- $('#lres').innerHTML=`<h3 style="margin-top:20px">${esc(f.n)}</h3><small style="color:var(--mute)">${esc(f.p)}${f.prov?' · Đặc sản '+esc(f.prov):''} · ${f.reg==='Quốc tế'&&f.id>=253?'Phổ biến':f.reg}</small>${alertHTML(h)}
- <div style="margin:12px 0"><div class="seg">${Object.keys(SZ).map(k=>`<button data-z="${k}" class="${SZ[k]===s?'on':''}">Size ${k}</button>`).join('')}</div> <small style="color:var(--mute)">S 70% · M 100% · L 130%</small></div>
- <div class="nut"><div><b>${fmt(f.k*s)}</b><span>kcal</span></div><div><b>${(f.pr*s).toFixed(1)}g</b><span>Đạm</span></div><div><b>${(f.f*s).toFixed(1)}g</b><span>Béo</span></div><div><b>${(f.c*s).toFixed(1)}g</b><span>Carb</span></div></div>
- <div class="tip">💡 ${advice(f)}<br><small>Vitamin và khoáng chất: tùy nguyên liệu, hãy ăn đa dạng rau củ và trái cây.</small></div><br><button class="btn" onclick="logFood()">Lưu vào nhật ký</button>`;
- $$('#lres [data-z]').forEach(b=>b.onclick=()=>{size=SZ[b.dataset.z];drawFood()})}
-function logFood(){if(!cur)return;addLog({n:cur.n+(size!==1?` (size ${size===.7?'S':'L'})`:''),k:cur.k*size,pr:cur.pr*size,f:cur.f*size,c:cur.c*size,veg:/rau|canh|gỏi|nộm|cải|muống|dưa/i.test(cur.n)});}
+/* Món cơ bản bổ sung (ngoài 252 món) để tra cứu & dựng thực đơn */
+const BASICS = [
+  { id: 'b1', name: 'Cơm trắng', serving: '1 bát (150g)', kcal: 200, protein: 4, fat: 0.5, carb: 45, region: 'Cơ bản', province: '', allergens: [], micro: 'vitamin B1, magiê', basic: 'rice' },
+  { id: 'b2', name: 'Chuối', serving: '1 quả (100g)', kcal: 90, protein: 1, fat: 0.3, carb: 23, region: 'Cơ bản', province: '', allergens: [], micro: 'kali, vitamin B6, C', basic: 'fruit' },
+  { id: 'b3', name: 'Cam', serving: '1 quả (150g)', kcal: 62, protein: 1.2, fat: 0.2, carb: 15, region: 'Cơ bản', province: '', allergens: [], micro: 'vitamin C, folate', basic: 'fruit' },
+  { id: 'b4', name: 'Ổi', serving: '1 quả (150g)', kcal: 85, protein: 3, fat: 1, carb: 18, region: 'Cơ bản', province: '', allergens: [], micro: 'vitamin C, chất xơ', basic: 'fruit' },
+  { id: 'b5', name: 'Đu đủ', serving: '1 chén (150g)', kcal: 65, protein: 1, fat: 0.3, carb: 16, region: 'Cơ bản', province: '', allergens: [], micro: 'vitamin A, C', basic: 'fruit' },
+  { id: 'b6', name: 'Dưa hấu', serving: '1 miếng (200g)', kcal: 60, protein: 1.2, fat: 0.3, carb: 15, region: 'Cơ bản', province: '', allergens: [], micro: 'vitamin A, C, nước', basic: 'fruit' },
+  { id: 'b7', name: 'Táo', serving: '1 quả (150g)', kcal: 78, protein: 0.4, fat: 0.3, carb: 21, region: 'Cơ bản', province: '', allergens: [], micro: 'chất xơ, vitamin C', basic: 'fruit' },
+  { id: 'b8', name: 'Trứng luộc', serving: '1 quả (50g)', kcal: 78, protein: 6, fat: 5, carb: 0.6, region: 'Cơ bản', province: '', allergens: ['Trứng'], micro: 'vitamin B12, D, choline', basic: 'protein' },
+  { id: 'b9', name: 'Sữa tươi không đường', serving: '1 hộp (180ml)', kcal: 115, protein: 6, fat: 6, carb: 9, region: 'Cơ bản', province: '', allergens: ['Sữa'], micro: 'canxi, vitamin D, B2', basic: 'milk' },
+];
+const FOODS = window.FOODS.concat(BASICS);
+const VEG_RE = /rau|cải|muống|canh|nộm|gỏi|ngó sen|củ hủ|hoa chuối|bắp cải/i;
+const isVeg = f => f.basic === 'fruit' || (f.veg ?? VEG_RE.test(f.name));
+const isVegetable = n => /rau|cải|muống|bắp cải|su su|bí|cà rốt|ngó sen|hoa chuối|củ hủ|nộm|gỏi|canh|dưa/i.test(n);
 
-/* ---------- 3. Camera AI (Gemini) ---------- */
-const KEY=()=>(window.NF_CONFIG&&NF_CONFIG.GEMINI_API_KEY)||L('nf_key','');
-async function gem(parts){const k=KEY();if(!k)throw new Error('Chưa có API key Gemini.');
- for(const m of [NF_CONFIG.MODEL,NF_CONFIG.FALLBACK]){
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts}],generationConfig:{responseMimeType:'application/json',temperature:.2,maxOutputTokens:700}})});
-  if(r.ok){const j=await r.json();return JSON.parse(j.candidates[0].content.parts[0].text.replace(/```json|```/g,''))}
-  if(r.status!==429&&r.status!==404&&r.status!==503)throw new Error('Lỗi Gemini '+r.status+(r.status===400||r.status===403?': kiểm tra lại API key.':'.'))}
- throw new Error('Hết hạn mức Gemini miễn phí, vui lòng thử lại sau ít phút.')}
-const PROMPT=`Bạn là chuyên gia dinh dưỡng Việt Nam cho học sinh THPT. Trả về DUY NHẤT JSON: {"name":"tên món tiếng Việt","portion":"khẩu phần ước tính","kcal":số,"protein":số,"fat":số,"carb":số,"vitamins":"vitamin và khoáng chất chính","allergens":["thành phần dễ gây dị ứng"],"province":"tỉnh/thành đặc sản theo đơn vị hành chính mới hoặc rỗng nếu món phổ biến khắp nơi","advice":"1-2 câu khuyên"}. Nếu ảnh không phải món ăn: {"error":"..."}.`;
-function aiCard(r,mul=1){if(r.error)return`<h3>Kết quả</h3><div class="tip">${esc(r.error)}</div>`;
- const h=warn(r.name,[],(r.allergens||[]).join(' '));cur={n:r.name,k:r.kcal*mul,pr:r.protein*mul,f:r.fat*mul,c:r.carb*mul};
- return`<h3>${esc(r.name)}</h3><small style="color:var(--mute)">${esc(r.portion||'')}${r.province?' · Đặc sản '+esc(r.province):''}</small>${alertHTML(h)}
- <div class="nut"><div><b>${fmt(cur.k)}</b><span>kcal</span></div><div><b>${cur.pr.toFixed(1)}g</b><span>Đạm</span></div><div><b>${cur.f.toFixed(1)}g</b><span>Béo</span></div><div><b>${cur.c.toFixed(1)}g</b><span>Carb</span></div></div>
- <p><small>🥕 ${esc(r.vitamins||'')}</small></p><div class="tip">💡 ${esc(r.advice||'')}</div><br><button class="btn" onclick="size=1;logFood()">Lưu vào nhật ký</button>`}
-async function aiLookup(q){$('#sug').innerHTML='';$('#lres').innerHTML='<p><span class="spin"></span> AI đang phân tích…</p>';
- try{const r=await gem([{text:PROMPT+'\nMón cần tra cứu: '+q.slice(0,80)}]);$('#lres').innerHTML=aiCard(r);award('look',3,5)}catch(e){$('#lres').innerHTML=`<div class="alert">${esc(e.message)}</div>`}}
-let stream=null,shot=null,lastR=null;
-async function openCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});const v=document.createElement('video');v.srcObject=stream;v.playsInline=true;v.muted=true;v.play();$('#cam').innerHTML='';$('#cam').append(v);shot=null}catch(e){toast('Không mở được camera. Hãy dùng “Thêm hình ảnh”.')}}
-function toJpeg(src,w,h){const c=document.createElement('canvas'),m=Math.min(1,720/Math.max(w,h));c.width=w*m;c.height=h*m;c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.8)}
-function snap(){const v=$('#cam video');if(!v){return toast('Hãy mở camera hoặc thêm hình ảnh trước')}shot=toJpeg(v,v.videoWidth,v.videoHeight);stream?.getTracks().forEach(t=>t.stop());stream=null;showShot();analyze()}
-$('#file').onchange=e=>{const f=e.target.files[0];if(!f)return;const i=new Image();i.onload=()=>{shot=toJpeg(i,i.width,i.height);showShot();analyze()};i.src=URL.createObjectURL(f)};
-function showShot(){$('#cam').innerHTML=`<img src="${shot}" alt="Ảnh món ăn">`}
-$$('#amt button').forEach(b=>b.onclick=()=>{$$('#amt button').forEach(x=>x.classList.toggle('on',x===b));if(lastR)$('#cres').innerHTML=aiCard(lastR,+b.dataset.v)});
-async function analyze(){const mul=+$('#amt .on').dataset.v;$('#cres').innerHTML='<p><span class="spin"></span> AI đang nhận diện món ăn…</p>';
- try{lastR=await gem([{text:PROMPT},{inline_data:{mime_type:'image/jpeg',data:shot.split(',')[1]}}]);$('#cres').innerHTML=aiCard(lastR,mul);award('cam',8,5)}catch(e){$('#cres').innerHTML=`<h3>Kết quả</h3><div class="alert">${esc(e.message)}</div>`}}
+/* ================= Trạng thái ================= */
+const KEY = 'nf_state_v1';
+const defState = () => ({ profile: null, diary: {}, points: 0, streak: { last: '', n: 0 }, badges: [], lookups: [], daily: {}, quiz: null, quizPerfect: 0, weeklyDone: {}, themes: ['default'], theme: 'default', menu: null });
+let S = defState();
+try { const raw = localStorage.getItem(KEY); if (raw) S = Object.assign(defState(), JSON.parse(raw)); } catch (e) { /* bỏ qua */ }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* bỏ qua */ } };
+const getKey = () => { try { return localStorage.getItem('nf_key') || ''; } catch (e) { return ''; } };
+const getModel = () => { try { return localStorage.getItem('nf_model') || ''; } catch (e) { return ''; } };
 
-/* ---------- 4. Thực đơn ---------- */
-const FRUIT=[['Chuối','1 quả',90,1,.3,23],['Cam','1 quả',62,1.2,.2,15],['Ổi','1 quả',68,2.6,.9,14],['Đu đủ','1 chén',62,.7,.4,16],['Dưa hấu','1 chén',46,.9,.2,11],['Thanh long','1/2 quả',55,1.1,.3,13]];
-const VEG=F.filter(f=>/^(Rau|Canh cua rau|Canh cá nấu chua|Canh chua)/.test(f.n));
-const okF=f=>!warn(f.n,f.al).length;
-const rnd=a=>a[Math.floor(Math.random()*a.length)];
-let used=[];function near(pool,kc){return rnd(pool.filter(f=>okF(f)&&!used.includes(f.id)&&!/giả cầy/.test(f.n)).sort((a,b)=>Math.abs(a.k-kc)-Math.abs(b.k-kc)).slice(0,5))}
-function genMenu(){used=[];const T=target(),fr=rnd(FRUIT),vg=rnd(VEG.filter(okF)),
- b=near(F.filter(f=>/^(Phở|Bún|Bánh cuốn|Xôi|Cháo|Bánh mì|Miến|Hủ tiếu|Bánh canh|Mì Quảng)/.test(f.n)&&f.k<=560),T*.27),
- l=(used.push(b.id),near(F.filter(f=>/^Cơm|Hủ tiếu|Bún thịt|Bún bò/.test(f.n)&&f.k>=450),T*.36)),
- d=(used.push(l.id),near(F.filter(f=>/^(Cá|Gà|Thịt|Canh|Sườn|Đậu|Bò|Tôm|Gỏi|Bún|Mì|Cháo)/.test(f.n)&&f.k<=520),T*.3));
- if(!b||!l||!d)return;const items=[['🌅 Bữa sáng',[b],null],['☀️ Bữa trưa',[l,vg],null],['🌙 Bữa tối',[d,vg===VEG[0]?VEG[1]:rnd(VEG.filter(okF))],fr]];
- let tot=0;const row=([t,fs,fruit])=>{const k=fs.reduce((s,f)=>s+f.k,0)+(fruit?fruit[2]:0);tot+=k;
-  return`<div class="meal"><div style="flex:1"><h4>${t}</h4><p>${fs.map(f=>`<b>${esc(f.n)}</b> (${esc(f.p)})`).join(' + ')}${fruit?` + <b>${fruit[0]}</b> (${fruit[1]})`:''}</p></div><b style="color:var(--blue)">${fmt(k)} kcal</b></div>`};
- const html=items.map(row).join('');$('#menu').innerHTML=html+`<div class="tip">✅ Đủ 4 nhóm chất: bột đường, đạm, béo, vitamin và khoáng chất, kèm rau xanh và trái cây.<br>Tổng khoảng <b>${fmt(tot)} kcal</b> so với mục tiêu <b>${fmt(T)} kcal</b>${P()?'':' (mặc định, hãy tạo hồ sơ để cá nhân hóa)'}.</div>`}
+/* ================= Hồ sơ / công thức ================= */
+function calcProfile(p) {
+  const h = p.h / 100, bmi = p.w / (h * h);
+  let cat, cls = '';
+  if (bmi < 18.5) { cat = 'Thiếu cân'; cls = 'warnk'; }
+  else if (bmi < 23) cat = 'Bình thường';
+  else if (bmi < 25) { cat = 'Thừa cân'; cls = 'warnk'; }
+  else { cat = 'Béo phì'; cls = 'warnk'; }
+  // Mifflin–St Jeor × hệ số vận động, làm tròn 50 kcal
+  const bmr = 10 * p.w + 6.25 * p.h - 5 * p.age + (p.sex === 'm' ? 5 : -161);
+  const kcal = Math.round(bmr * p.act / 50) * 50;
+  const water = Math.round(p.w * 33 / 100) / 10; // 33 ml/kg
+  return { bmi: round1(bmi), cat, cls, kcal, water, bmr: Math.round(bmr) };
+}
+const target = () => (S.profile ? calcProfile(S.profile).kcal : 2000);
+const myAllergens = () => (S.profile ? S.profile.allergens : []);
+const hits = f => (f.allergens || []).filter(a => myAllergens().includes(a));
 
-/* ---------- 5. Nhật ký ---------- */
-const D=()=>L('nf_diary',{});
-function addLog(it){const d=D(),t=today();(d[t]=d[t]||[]).push(it);W('nf_diary',d);toast('Đã lưu vào nhật ký');award('log',10,10);if(it.veg)weekVeg(it.n)}
-function renderDiary(){const items=D()[today()]||[],T=target(),s=k=>items.reduce((a,i)=>a+i[k],0),kc=s('k');
- $('#log').innerHTML=items.map((i,x)=>`<li><span>${esc(i.n)}</span><span>${fmt(i.k)} kcal <button onclick="delLog(${x})" aria-label="Xóa">✕</button></span></li>`).join('')||'<li>Chưa có món nào hôm nay.</li>';
- const pc=Math.min(100,kc/T*100);$('#donut').style.background=`conic-gradient(var(--blue) 0 ${pc}%,var(--ice) 0)`;$('#dk').innerHTML=`${fmt(kc)}<small>/ ${fmt(T)} kcal</small>`;
- const g=[['Carb',s('c')*4,'#4aa3ff'],['Protein',s('pr')*4,'#12a36b'],['Fat',s('f')*9,'#f5a524']],tot=g.reduce((a,x)=>a+x[1],0)||1;
- $('#macro').innerHTML=g.map(x=>`<div style="display:flex;justify-content:space-between;font-size:.88rem"><span>● <span style="color:${x[2]}">${x[0]}</span></span><b>${Math.round(x[1]/tot*100)}%</b></div><div class="bar2"><i style="width:${x[1]/tot*100}%;background:${x[2]}"></i></div>`).join('');
- let a=!items.length?'Hãy ghi món đầu tiên để nhận lời khuyên.':kc>T*1.1?'Bạn đã nạp dư năng lượng, hãy chọn bữa tiếp theo nhẹ hơn.':kc<T*.6?'Bạn còn thiếu nhiều năng lượng, đừng bỏ bữa nhé.':'Năng lượng hôm nay khá cân đối.';
- if(items.length&&!items.some(i=>i.veg))a+=' Hôm nay bạn thiếu chất xơ, hãy thêm rau xanh và trái cây.';$('#dadv').textContent='💡 '+a;
- if(items.length&&kc>=T*.9&&kc<=T*1.1)award('healthy',15,15,1)}
-function delLog(i){const d=D();d[today()].splice(i,1);W('nf_diary',d);renderDiary()}
-function exp(){const b=new Blob([JSON.stringify({v:1,profile:P(),diary:D(),game:L('nf_game',{})},null,1)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='nutrifuture-'+today()+'.json';a.click()}
-$('#imp').onchange=e=>{const r=new FileReader();r.onload=()=>{try{const j=JSON.parse(r.result);if(j.profile)W('nf_profile',j.profile);if(j.diary)W('nf_diary',j.diary);if(j.game)W('nf_game',j.game);toast('Đã khôi phục dữ liệu');renderDiary()}catch(x){toast('File JSON không hợp lệ')}};r.readAsText(e.target.files[0])};
+/* ================= Điều hướng ================= */
+const FEATURES = [
+  { id: 'f1', ico: '🧑‍🎓', t: 'Hồ sơ & cảnh báo dị ứng', d: 'Tính BMI, nhu cầu calo, lượng nước và lưu hồ sơ dị ứng.' },
+  { id: 'f2', ico: '🔍', t: 'Tra cứu dinh dưỡng', d: '252 món Bắc – Trung – Nam, chọn khẩu phần S/M/L.' },
+  { id: 'f3', ico: '📷', t: 'Nhận diện bằng AI', d: 'Chụp ảnh món ăn, AI phân tích và cảnh báo dị ứng.' },
+  { id: 'f4', ico: '🍱', t: 'Thực đơn khoa học', d: '3 bữa cân đối, đủ 4 nhóm chất, đổi món theo sở thích.' },
+  { id: 'f5', ico: '📒', t: 'Nhật ký & theo dõi', d: 'Biểu đồ calo, phân tích Carb – Đạm – Béo, sao lưu JSON.' },
+  { id: 'f6', ico: '🎮', t: 'Học mà chơi', d: 'Câu đố mỗi ngày, điểm, chuỗi ngày, huy hiệu, thử thách.' },
+];
+$('#featureCards').innerHTML = FEATURES.map((f, i) => `<button class="fcard" data-view="${f.id}"><div class="ico">${f.ico}</div><h3>${i + 1}. ${esc(f.t)}</h3><p>${esc(f.d)}</p></button>`).join('');
 
-/* ---------- 6. Gamification ---------- */
-const G=()=>Object.assign({pts:0,streak:0,last:'',caps:{},badges:{},veg:{},q:{day:'',list:[],i:0,ok:0}},L('nf_game',{}));
-const LV=[['Khởi đầu xanh','Bong bóng nhẹ nổi lên',0],['Rạng đông','Tia nắng ban mai',100],['Thiên lam','Mây trôi, sóng nước',250],['Cực quang','Dải sáng bảy màu',450],['Hành tinh','Quỹ đạo & màn hình HUD',700],['Hoàng kim','Bụi vàng rơi, khung son',1000],['Thần quang','Thánh quang, lông vũ',1400],['Vĩnh Hằng','Lửa bất diệt',1900],['Ngân hà','Bắc Đẩu · Sao băng',2500]];
-function award(key,pts,cap=1,once){const g=G(),k=key+today();g.caps[k]=(g.caps[k]||0)+1;if(g.caps[k]>cap)return;g.pts+=pts;
- if(key==='profile')g.badges.newbie=1;if(key==='healthy')g.badges.healthy=1;if(key==='cam')g.badges.cam=1;W('nf_game',g);if(!once)toast(`+${pts} điểm`);applyRealm()}
-function daily(){const g=G(),t=today();if(g.last===t)return;const y=new Date();y.setDate(y.getDate()-1);g.streak=g.last===y.toISOString().slice(0,10)?g.streak+1:1;g.last=t;g.pts+=5;if(g.streak>=7)g.badges.s7=1;W('nf_game',g)}
-function weekVeg(n){const g=G(),w=week();g.veg[w]=[...new Set([...(g.veg[w]||[]),n])];W('nf_game',g)}
-const QB=[['Nhóm chất nào là nguồn năng lượng chính của cơ thể?',['Bột đường (carbohydrate)','Vitamin','Nước','Chất khoáng'],0,1],['Bạn nên uống khoảng bao nhiêu nước mỗi ngày?',['Khoảng 2 lít','Dưới 500 ml','Chỉ khi khát','5 lít'],0,1],['Rau xanh cung cấp nhiều nhất chất nào?',['Chất xơ và vitamin','Chất béo bão hòa','Đường','Cholesterol'],0,1],['Bữa sáng quan trọng vì…',['Cung cấp năng lượng cho buổi học','Giúp ngủ ngon hơn','Làm giảm chiều cao','Không có tác dụng'],0,1],['Chất đạm giúp cơ thể…',['Xây dựng và sửa chữa cơ bắp','Hòa tan vitamin','Giữ ấm da','Tạo ra nước'],0,2],['BMI từ 18,5 đến dưới 23 ở người châu Á trưởng thành là…',['Bình thường','Thiếu cân','Béo phì','Suy dinh dưỡng nặng'],0,2],['Thực phẩm nào giàu canxi?',['Sữa và sữa chua','Nước ngọt','Khoai tây chiên','Kẹo'],0,2],['1 gram chất béo cung cấp bao nhiêu kcal?',['9 kcal','4 kcal','7 kcal','2 kcal'],0,3],['1 gram đạm hoặc tinh bột cung cấp bao nhiêu kcal?',['4 kcal','9 kcal','7 kcal','0 kcal'],0,3],['Thiếu vitamin A dễ gây vấn đề gì?',['Khô mắt, quáng gà','Gãy xương','Thiếu máu','Sâu răng'],0,3],['Sắt giúp cơ thể…',['Tạo hồng cầu, vận chuyển oxy','Làm cứng răng','Giảm huyết áp','Tăng đường huyết'],0,4],['Công thức Mifflin–St Jeor dùng để tính…',['Năng lượng chuyển hóa cơ bản (BMR)','Lượng nước','Chỉ số đường huyết','Huyết áp'],0,4],['Bánh tráng trộn, trà sữa có điểm chung gì cần lưu ý?',['Nhiều đường, béo, năng lượng cao','Rất nhiều rau','Rất ít calo','Không có carb'],0,3],['Người dị ứng đậu phộng cần làm gì?',['Đọc kỹ thành phần và tránh hoàn toàn','Ăn ít một','Uống nhiều nước','Không cần lo'],0,2],['Carb hấp thụ chậm, tốt cho đường huyết thường có nhiều…',['Chất xơ','Đường tinh luyện','Muối','Chất bảo quản'],0,5]];
-async function buildQuiz(g){const seed=+today().replace(/-/g,'');let list=null;
- if(KEY()){try{const r=await gem([{text:`Tạo 5 câu hỏi trắc nghiệm dinh dưỡng cho học sinh THPT Việt Nam, từ dễ đến khó, khác nhau mỗi ngày (mã ngày ${seed}). JSON: {"q":[{"t":"câu hỏi","o":["đáp án đúng","sai","sai","sai"]}]}. Đáp án đúng luôn đứng đầu.`}]);list=r.q.slice(0,5).map(x=>[x.t,x.o,0]).filter(x=>x[1].length===4)}catch(e){}}
- if(!list||list.length<5){let a=QB.map((q,i)=>[q,(i*7919+seed*31)%97]).sort((x,y)=>x[1]-y[1]).slice(0,5).map(x=>x[0]);list=a.sort((x,y)=>x[3]-y[3])}
- g.q={day:today(),list,i:0,ok:0};W('nf_game',g);return g}
-async function renderQuiz(){let g=G();if(g.q.day!==today()||g.q.list.length<5){$('#quiz').innerHTML='<span class="spin"></span>';g=await buildQuiz(g)}
- const q=g.q;if(q.i>=5){$('#qn').textContent='';$('#quiz').innerHTML=`<div class="tip">🎉 Hoàn thành! Bạn đúng ${q.ok}/5 câu hôm nay. Mai sẽ có 5 câu mới.</div>`;return}
- $('#qn').textContent=`(${q.i+1}/5)`;const[t,o]=q.list[q.i],ord=o.map((x,i)=>[x,i]).sort((a,b)=>(a[0].length*7+q.i)%5-(b[0].length*7+q.i)%5);
- $('#quiz').innerHTML=`<p style="margin-top:8px"><b>${esc(t)}</b></p>`+ord.map(([x,i])=>`<button class="opt" data-c="${i===0?1:0}">${esc(x)}</button>`).join('');
- $$('#quiz .opt').forEach(b=>b.onclick=()=>{$$('#quiz .opt').forEach(x=>{x.disabled=true;if(x.dataset.c==='1')x.classList.add('ok')});const g=G();if(b.dataset.c==='1'){g.q.ok++;g.pts+=10;toast('Chính xác! +10 điểm')}else{b.classList.add('no');toast('Chưa đúng, thử câu tiếp nhé')}
-  g.q.i++;W('nf_game',g);applyRealm();$('#gp').textContent=g.pts;setTimeout(renderQuiz,1100)})}
-function renderGame(){daily();const g=G();$('#gp').textContent=g.pts;$('#gs').textContent=g.streak;
- const v=(g.veg[week()]||[]).length;$('#wk').style.width=Math.min(100,v/5*100)+'%';$('#wkt').textContent=`${Math.min(v,5)}/5 loại rau củ tuần này${v>=5?' — hoàn thành! 🎉':''}`;
- if(v>=5&&!g.badges.veg){g.badges.veg=1;g.pts+=30;W('nf_game',g)}
- const B=[['newbie','🌱 Người mới'],['healthy','🥦 Ăn uống lành mạnh'],['s7','🔥 7 ngày liên tục'],['cam','📷 Thợ săn món ngon'],['veg','🥕 Vua rau củ']];
- $('#badges').innerHTML=B.map(b=>`<span class="badge ${g.badges[b[0]]?'':'off'}">${b[1]}</span>`).join('');
- const r=realmLv(g.pts);$('#lvs').innerHTML=LV.map((l,i)=>`<div class="lv ${g.pts<l[2]?'lock':''} ${i===r?'cur':''}" data-i="${i}"><b>Cấp ${i+1}. ${l[0]}</b><small>${l[1]}</small><small>${g.pts<l[2]?'🔒 Cần '+l[2]+' điểm (xem thử 5 giây)':'✅ Đã mở khóa'}</small></div>`).join('');
- $$('#lvs .lv').forEach(e=>e.onclick=()=>{const i=+e.dataset.i;setRealm(i);if(g.pts<LV[i][2]){toast('Đang xem thử 5 giây…');setTimeout(applyRealm,5000)}});renderQuiz()}
-const realmLv=p=>LV.reduce((a,l,i)=>p>=l[2]?i:a,0);
-function setRealm(i){document.body.dataset.realm=i?'r'+(i+1):'';mode=i}
-function applyRealm(){setRealm(realmLv(G().pts))}
+function show(id) {
+  if (!$('#view-' + id)) id = 'home';
+  $$('.view').forEach(v => v.hidden = v.id !== 'view-' + id);
+  $$('#nav a').forEach(a => a.classList.toggle('on', a.dataset.view === id));
+  if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+  window.scrollTo({ top: 0 });
+  if (id !== 'f3') stopCam();
+  if (id === 'f4') renderMenu();
+  if (id === 'f5') renderDiary();
+  if (id === 'f6') renderGame();
+  if (id === 'f1') renderProfile();
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-view]');
+  if (a) { e.preventDefault(); show(a.dataset.view); }
+});
+window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'home'));
 
-/* ---------- Hiệu ứng nền: bong bóng + giao diện theo cấp ---------- */
-const cv=$('#fx'),cx=cv.getContext('2d');let mode=0,PS=[],W_,H_,t0=0;
-const rs=()=>{W_=cv.width=innerWidth;H_=cv.height=innerHeight};addEventListener('resize',rs);rs();
-const R=(a,b)=>a+Math.random()*(b-a);
-function mk(){const m=mode;return{x:R(0,W_),y:m>=5&&m<=6&&m!==4||m===0||m===7?(m===5||m===6?-20:H_+20):R(0,H_),r:R(4,m===0?30:12),v:R(.3,1.2),p:R(0,6.28),a:R(.15,.5),c:m===3?`hsl(${R(120,300)},80%,70%)`:m===8?`hsl(${R(30,45)},95%,60%)`:'#fff'}}
-for(let i=0;i<60;i++){const q=mk();q.y=R(0,H_);q.m=0;PS.push(q)}
-function frame(t){cx.clearRect(0,0,W_,H_);const m=mode;
- if(m===1){const g=cx.createRadialGradient(W_*.85,-40,10,W_*.85,-40,H_);g.addColorStop(0,'rgba(255,200,120,.55)');g.addColorStop(1,'rgba(255,200,120,0)');cx.fillStyle=g;cx.fillRect(0,0,W_,H_)}
- if(m===2){for(let i=0;i<4;i++){cx.fillStyle='rgba(255,255,255,.35)';const x=((t*.01*(i+1)+i*400)%(W_+400))-200;cx.beginPath();cx.ellipse(x,90+i*70,130,32,0,0,7);cx.fill()}cx.strokeStyle='rgba(5,79,212,.25)';for(let k=0;k<3;k++){cx.beginPath();for(let x=0;x<=W_;x+=12)cx.lineTo(x,H_-40-k*22+Math.sin(x/70+t/600+k)*10);cx.stroke()}}
- if(m===3){for(let i=0;i<5;i++){const g=cx.createLinearGradient(0,0,0,H_*.6);g.addColorStop(0,`hsla(${(t/30+i*60)%360},90%,65%,.35)`);g.addColorStop(1,'transparent');cx.fillStyle=g;cx.beginPath();cx.moveTo(0,0);for(let x=0;x<=W_;x+=20)cx.lineTo(x,60+i*30+Math.sin(x/160+t/900+i)*40);cx.lineTo(W_,0);cx.fill()}}
- if(m===4){cx.strokeStyle='rgba(120,180,255,.35)';[1,.7,.45].forEach((s,i)=>{cx.beginPath();cx.ellipse(W_*.8,H_*.28,170*s,60*s,t/3000*(i%2?-1:1),0,7);cx.stroke()});cx.fillStyle='rgba(74,163,255,.5)';cx.beginPath();cx.arc(W_*.8,H_*.28,26,0,7);cx.fill();cx.strokeStyle='rgba(120,200,255,.5)';cx.strokeRect(10,10,W_-20,H_-20)}
- if(m===5){cx.strokeStyle='rgba(155,28,28,.45)';cx.lineWidth=6;cx.strokeRect(6,6,W_-12,H_-12);cx.lineWidth=1}
- if(m===8){for(let i=0;i<70;i++){const x=(i*9973)%W_,y=(i*7919)%H_;cx.fillStyle=`rgba(255,255,255,${.3+.5*Math.abs(Math.sin(t/700+i))})`;cx.fillRect(x,y,2,2)}const s=(t/12)%(W_+300);cx.strokeStyle='#fff';cx.beginPath();cx.moveTo(s,s*.4%H_);cx.lineTo(s-90,(s-90)*.4%H_);cx.stroke()}
- PS.forEach(p=>{p.p+=.02;const dir=m===5||m===6?1:-1;p.y+=dir*p.v*(m===7?1.8:1);p.x+=Math.sin(p.p)*.5;
-  if(p.y<-40||p.y>H_+40||m!==p.m){Object.assign(p,mk());p.m=m}
-  cx.globalAlpha=p.a;
-  if(m===0||m===2){cx.strokeStyle='rgba(5,79,212,.35)';cx.fillStyle='rgba(120,190,255,.22)';cx.beginPath();cx.arc(p.x,p.y,p.r,0,7);cx.fill();cx.stroke();cx.fillStyle='rgba(255,255,255,.7)';cx.beginPath();cx.arc(p.x-p.r*.35,p.y-p.r*.35,p.r*.2,0,7);cx.fill()}
-  else if(m===5){cx.fillStyle='#e6a800';cx.fillRect(p.x,p.y,p.r/3,p.r/3)}
-  else if(m===6){cx.fillStyle='#fff';cx.strokeStyle='#d9b84a';cx.beginPath();cx.ellipse(p.x,p.y,p.r*.4,p.r,p.p,0,7);cx.fill();cx.stroke()}
-  else if(m===7){cx.fillStyle=p.c;cx.beginPath();cx.arc(p.x,p.y,p.r*.4,0,7);cx.fill()}
-  else if(m===8||m===3||m===4||m===1){cx.fillStyle=m===3?p.c:'#fff';cx.beginPath();cx.arc(p.x,p.y,p.r*.3,0,7);cx.fill()}
-  cx.globalAlpha=1});
- requestAnimationFrame(frame)}
-if(!matchMedia('(prefers-reduced-motion:reduce)').matches)requestAnimationFrame(frame);
+/* ================= Điểm / huy hiệu ================= */
+const BADGES = [
+  { id: 'new', e: '🌱', n: 'Người mới', d: 'Tạo hồ sơ' },
+  { id: 'explorer', e: '🧭', n: 'Nhà thám hiểm', d: 'Tra cứu 10 món' },
+  { id: 'healthy', e: '🥦', n: 'Ăn uống lành mạnh', d: 'Một ngày đủ calo & có rau' },
+  { id: 'diary20', e: '📒', n: 'Chăm ghi chép', d: '20 món trong nhật ký' },
+  { id: 'streak7', e: '🔥', n: '7 ngày liên tục', d: 'Mở app 7 ngày liền' },
+  { id: 'quiz', e: '🧠', n: 'Bộ óc dinh dưỡng', d: 'Đúng cả 5 câu đố' },
+];
+function award(pts, why) { S.points += pts; save(); header(); if (why) toast(`+${pts} điểm · ${why}`); }
+function giveBadge(id) {
+  if (S.badges.includes(id)) return;
+  S.badges.push(id); save();
+  const b = BADGES.find(x => x.id === id); toast(`🏅 Huy hiệu mới: ${b.n}`);
+}
+function header() { $('#ptsTxt').textContent = fmt(S.points); $('#streakTxt').textContent = S.streak.n; }
+function touchStreak() {
+  const t = dayKey(), y = dayKey(new Date(Date.now() - 864e5));
+  if (S.streak.last === t) return;
+  S.streak.n = S.streak.last === y ? S.streak.n + 1 : 1; S.streak.last = t;
+  if (S.streak.n >= 7) giveBadge('streak7');
+  save();
+}
+const dayState = () => (S.daily[dayKey()] ??= { look: [], logs: 0, healthy: false });
 
-/* ---------- Khởi động ---------- */
-setInterval(()=>{const e=$('#demoK');if(e){const v=1200+Math.round(Math.random()*40)*20;e.firstChild.nodeValue=fmt(v)}},3200);
-daily();applyRealm();fillProfile();const h=location.hash.slice(1);if(h&&$('#'+h))go(h);
+/* ================= Tính năng 1 ================= */
+$('#allergyChecks').innerHTML = ALLERGENS.map(a => `<label><input type="checkbox" value="${esc(a)}">${esc(a)}</label>`).join('');
+function renderProfile() {
+  const p = S.profile;
+  if (p) {
+    $('#pName').value = p.name; $('#pAge').value = p.age; $('#pSex').value = p.sex; $('#pAct').value = p.act; $('#pH').value = p.h; $('#pW').value = p.w;
+    $$('#allergyChecks input').forEach(c => c.checked = p.allergens.includes(c.value));
+    const r = calcProfile(p);
+    $('#profileResult').innerHTML = `<h3>Kết quả của ${esc(p.name)}</h3>
+      <div class="kpis">
+        <div class="kpi ${r.cls}"><small>Chỉ số BMI</small><b>${fmt(r.bmi, 1)}</b><br><em>${r.cat}</em></div>
+        <div class="kpi"><small>Calo mỗi ngày</small><b>${fmt(r.kcal)}</b><br><em>kcal</em></div>
+        <div class="kpi"><small>Nước mỗi ngày</small><b>${fmt(r.water, 1)}</b><br><em>lít</em></div>
+      </div>
+      ${p.allergens.length ? `<div class="alert">⚠️ <div>Hồ sơ dị ứng đã lưu: ${p.allergens.map(esc).join(', ')}.<br><span style="font-weight:500">Mọi món bạn tra cứu hoặc chụp ảnh sẽ được đối chiếu tự động.</span></div></div>` : `<div class="ok">✅ Bạn chưa khai báo dị ứng. Có thể cập nhật bất cứ lúc nào.</div>`}
+      <p class="hint">BMI phân loại theo ngưỡng châu Á – Thái Bình Dương; calo theo công thức Mifflin–St Jeor nhân hệ số vận động; nước ≈ 33 ml/kg. Đây là ước tính tham khảo.</p>`;
+  }
+}
+$('#profileForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const age = +$('#pAge').value;
+  if (age < 15 || age > 22) return toast('Tuổi hợp lệ từ 15 đến 22.');
+  const first = !S.profile;
+  S.profile = { name: $('#pName').value.trim(), age, sex: $('#pSex').value, act: +$('#pAct').value, h: +$('#pH').value, w: +$('#pW').value, allergens: $$('#allergyChecks input:checked').map(c => c.value) };
+  save(); renderProfile(); toast('Đã lưu hồ sơ ✔');
+  giveBadge('new'); if (first) award(10, 'tạo hồ sơ');
+});
+
+/* ================= Tính năng 2 ================= */
+let region = 'Tất cả';
+const REGIONS = ['Tất cả', 'Bắc', 'Trung', 'Nam', 'Hiện đại', 'Cơ bản'];
+$('#regionFilters').innerHTML = REGIONS.map(r => `<button data-r="${r}" class="${r === region ? 'on' : ''}">${r === 'Hiện đại' ? 'Ăn vặt & đồ uống' : r === 'Cơ bản' ? 'Món cơ bản' : r === 'Tất cả' ? 'Tất cả' : 'Miền ' + r}</button>`).join('');
+$('#regionFilters').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  region = b.dataset.r; $$('#regionFilters button').forEach(x => x.classList.toggle('on', x === b)); renderSuggest();
+});
+$('#foodlist').innerHTML = FOODS.map(f => `<option value="${esc(f.name)}">`).join('');
+
+function searchFoods(q) {
+  const n = norm(q), toks = n.split(/\s+/).filter(Boolean);
+  let list = FOODS.filter(f => region === 'Tất cả' || f.region === region);
+  if (!toks.length) return list;
+  list = list.filter(f => { const m = norm(f.name); return toks.every(t => m.includes(t)); });
+  return list.sort((a, b) => (norm(a.name).startsWith(n) ? 0 : 1) - (norm(b.name).startsWith(n) ? 0 : 1));
+}
+function renderSuggest() {
+  const q = $('#q').value, list = searchFoods(q).slice(0, 60);
+  $('#suggest').innerHTML = list.length ? list.map(f => `<button class="sug" data-id="${f.id}"><b>${esc(f.name)}</b><small>${fmt(f.kcal)} kcal · ${esc(f.serving)}</small></button>`).join('')
+    : `<div class="muted" style="grid-column:1/-1">Không có trong cơ sở dữ liệu. ${getKey() ? '<button class="btn ghost" id="aiLookup">✨ Tra cứu bằng AI</button>' : 'Thêm khóa Gemini trong ⚙️ để tra cứu món bất kỳ bằng AI.'}</div>`;
+}
+$('#q').addEventListener('input', renderSuggest);
+$('#qBtn').addEventListener('click', () => { const l = searchFoods($('#q').value); if (l.length) showFood(l[0]); else if (getKey()) aiLookup(); else renderSuggest(); });
+$('#q').addEventListener('keydown', e => { if (e.key === 'Enter') $('#qBtn').click(); });
+$('#suggest').addEventListener('click', e => {
+  if (e.target.id === 'aiLookup') return aiLookup();
+  const b = e.target.closest('.sug'); if (b) showFood(FOODS.find(f => String(f.id) === b.dataset.id));
+});
+
+function advise(f, m) {
+  const k = f.kcal * m, t = target(), tips = [];
+  if (k > 0.4 * t) tips.push('Món này chiếm hơn 40% nhu cầu calo cả ngày — nên ăn nhẹ hơn ở các bữa còn lại.');
+  if (f.fat * m > 25) tips.push('Khá nhiều chất béo, hạn chế ăn thường xuyên và nên kèm rau xanh.');
+  if (f.carb * m > 70 && f.protein * m < 12) tips.push('Nhiều tinh bột/đường, ít đạm: nên bổ sung thêm trứng, cá, đậu hoặc thịt nạc.');
+  if (f.protein * m >= 20) tips.push('Giàu đạm, tốt cho cơ và phát triển chiều cao.');
+  if (!isVeg(f) && f.basic !== 'fruit') tips.push('Ăn kèm một đĩa rau hoặc trái cây để đủ chất xơ và vitamin.');
+  if (f.region === 'Hiện đại' && f.carb * m > 35 && f.protein * m < 6) tips.push('Đồ uống/ăn vặt nhiều đường, chỉ nên dùng thỉnh thoảng; thay bằng nước lọc là tốt nhất.');
+  if (isVeg(f)) tips.unshift('Món nhiều rau/trái cây, giúp bổ sung chất xơ và vitamin.');
+  return tips.slice(0, 3);
+}
+
+/* Thẻ hiển thị món (dùng cho tra cứu và AI). mode: 'size' (S/M/L) hoặc 'qty' (Ít/Vừa/Nhiều) */
+function foodCardHTML(f, m, mode) {
+  const hit = hits(f), v = x => fmt(x * m, 1);
+  const sizeBtns = mode === 'size' ? `<div class="seg" data-seg>${[['S', .7], ['M', 1], ['L', 1.3]].map(([l, x]) => `<button data-m="${x}" class="${x === m ? 'on' : ''}">Size ${l}</button>`).join('')}</div>` : '';
+  return `<div class="food card">
+    <h2>${esc(f.name)}</h2>
+    <p class="muted">Khẩu phần chuẩn: ${esc(f.serving)}${f.province ? ` · Đặc sản: <b>${esc(f.province)}</b>` : ''}</p>
+    ${hit.length ? `<div class="alert" role="alert">⚠️ <div>CẢNH BÁO: món này có chứa ${hit.map(esc).join(', ')}!<br><span style="font-weight:500">Trùng với hồ sơ dị ứng của bạn — không nên ăn.</span></div></div>` : (myAllergens().length ? `<div class="ok">✅ Không phát hiện thành phần trong hồ sơ dị ứng của bạn.</div>` : '')}
+    ${sizeBtns}
+    <div class="nutri">
+      <div><b>${v(f.kcal)}</b><span>Calo (kcal)</span></div>
+      <div><b>${v(f.protein)}</b><span>Đạm (g)</span></div>
+      <div><b>${v(f.fat)}</b><span>Béo (g)</span></div>
+      <div><b>${v(f.carb)}</b><span>Carb (g)</span></div>
+    </div>
+    <p><b>Vitamin &amp; khoáng chất nổi bật:</b> ${esc(f.micro || '—')} <span class="muted">(ước tính theo nhóm thực phẩm)</span></p>
+    ${(f.allergens || []).length ? `<p><b>Có thể chứa:</b> ${f.allergens.map(a => `<span class="badge-tag ${myAllergens().includes(a) ? 'al' : ''}">${esc(a)}</span>`).join('')}</p>` : ''}
+    ${advise(f, m).map(t => `<div class="tip">💡 ${esc(t)}</div>`).join('')}
+    <div class="actions"><select data-meal style="width:auto;margin:0"><option>Sáng</option><option>Trưa</option><option>Tối</option><option>Phụ</option></select><button class="btn primary" data-save>📒 Lưu vào nhật ký</button></div>
+  </div>`;
+}
+function mountFood(container, f, mode, m0 = 1) {
+  let m = m0;
+  const draw = () => {
+    container.innerHTML = foodCardHTML(f, m, mode);
+    $$('[data-seg] button', container).forEach(b => b.onclick = () => { m = +b.dataset.m; draw(); });
+    $('[data-save]', container).onclick = () => { addEntry(f, m, $('[data-meal]', container).value); };
+  };
+  draw();
+  return { set(x) { m = x; draw(); } };
+}
+function showFood(f) {
+  if (!f) return;
+  mountFood($('#foodDetail'), f, 'size');
+  $('#foodDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const d = dayState();
+  if (!S.lookups.includes(f.name)) { S.lookups.push(f.name); if (S.lookups.length >= 10) giveBadge('explorer'); }
+  if (!d.look.includes(f.name) && d.look.length < 5) { d.look.push(f.name); award(2, 'tra cứu'); } else save();
+}
+
+/* ================= Gemini ================= */
+const MODELS = ['gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-flash-latest'];
+async function gemini(parts, { json = true } = {}) {
+  const key = getKey();
+  if (!key) throw new Error('NOKEY');
+  const custom = getModel();
+  let cand = custom ? [custom] : MODELS;
+  let remembered = ''; try { remembered = sessionStorage.getItem('nf_okmodel') || ''; } catch (e) { /* */ }
+  if (!custom && remembered) cand = [remembered, ...cand.filter(x => x !== remembered)];
+  let lastErr;
+  for (const m of cand) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0.2, ...(json ? { responseMimeType: 'application/json' } : {}) } }),
+    }).catch(() => null);
+    if (!r) { lastErr = new Error('NETWORK'); continue; }
+    if (r.ok) {
+      const data = await r.json();
+      const txt = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+      if (!txt) { lastErr = new Error('EMPTY'); continue; }
+      try { sessionStorage.setItem('nf_okmodel', m); } catch (e) { /* */ }
+      return json ? JSON.parse(txt.replace(/^```(?:json)?|```$/g, '').trim()) : txt;
+    }
+    if (r.status === 429) throw new Error('QUOTA');
+    if (r.status === 400 || r.status === 403) { const t = await r.text(); if (/API key|API_KEY|PERMISSION/i.test(t)) throw new Error('BADKEY'); }
+    lastErr = new Error('HTTP' + r.status);
+  }
+  throw lastErr || new Error('FAIL');
+}
+function aiError(e) {
+  const m = { NOKEY: 'Chưa có khóa Gemini. Bấm ⚙️ để nhập (xem README).', BADKEY: 'Khóa API không hợp lệ. Kiểm tra lại trong ⚙️.', QUOTA: 'Đã hết hạn mức miễn phí tạm thời. Hãy thử lại sau ít phút.', NETWORK: 'Không kết nối được tới Gemini. Kiểm tra mạng.', EMPTY: 'AI không trả về kết quả. Thử ảnh/từ khóa khác.' };
+  return m[e.message] || 'Lỗi AI (' + esc(e.message) + '). Thử lại sau.';
+}
+const FOOD_PROMPT = `Bạn là chuyên gia dinh dưỡng Việt Nam. Phân tích món ăn được cung cấp (ảnh hoặc tên) và CHỈ trả về JSON:
+{"recognized":true|false,"name":"tên món tiếng Việt","serving":"khẩu phần chuẩn, vd 1 tô (450g)","kcal":number,"protein":number,"fat":number,"carb":number,"allergens":[...],"province":"","micro":"2-3 vitamin/khoáng chất nổi bật","is_veg":true|false}
+- Giá trị dinh dưỡng cho 1 khẩu phần chuẩn của món.
+- "allergens" chỉ gồm các giá trị trong danh sách: ${ALLERGENS.join(' | ')}. Liệt kê MỌI thành phần có thể gây dị ứng (kể cả nước chấm, nước dùng).
+- "province": tỉnh/thành phố đặc sản theo đơn vị hành chính mới (sau sáp nhập 2025); để "" nếu món phổ biến khắp nơi.
+- Nếu không phải món ăn/thực phẩm, đặt "recognized": false.`;
+function toFood(r) {
+  const n = x => Math.max(0, +x || 0);
+  return { id: 'ai-' + Date.now(), name: String(r.name || 'Món ăn'), serving: String(r.serving || '1 phần'), kcal: n(r.kcal), protein: n(r.protein), fat: n(r.fat), carb: n(r.carb), province: String(r.province || ''), allergens: (r.allergens || []).filter(a => ALLERGENS.includes(a)), micro: String(r.micro || ''), veg: !!r.is_veg, region: 'AI', ai: true };
+}
+async function aiLookup() {
+  const q = $('#q').value.trim(); if (!q) return;
+  const box = $('#foodDetail'); box.innerHTML = `<div class="card"><span class="spin"></span>AI đang tra cứu “${esc(q)}”…</div>`;
+  try {
+    const r = await gemini([{ text: FOOD_PROMPT + '\nTên món: ' + q }]);
+    if (!r.recognized) { box.innerHTML = '<div class="card">Không nhận ra đây là món ăn. Hãy thử từ khóa khác.</div>'; return; }
+    showFoodObj(toFood(r));
+  } catch (e) { box.innerHTML = `<div class="card alert">${aiError(e)}</div>`; }
+}
+function showFoodObj(f) { mountFood($('#foodDetail'), f, 'size'); const d = dayState(); if (!d.look.includes(f.name) && d.look.length < 5) { d.look.push(f.name); award(2, 'tra cứu'); } }
+
+/* ================= Tính năng 3: camera ================= */
+let stream = null, qtyM = 1, lastAI = null, aiView = null;
+const video = $('#video'), prev = $('#preview');
+async function startCam() {
+  if (!navigator.mediaDevices?.getUserMedia) { toast('Trình duyệt không hỗ trợ camera — hãy dùng “Thêm hình ảnh”.'); return false; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    video.srcObject = stream; await video.play(); video.style.display = 'block'; prev.hidden = true; $('#camEmpty').hidden = true; $('#camStart').textContent = 'Tắt camera'; return true;
+  } catch (e) { toast('Không mở được camera (cần cho phép quyền, và chạy qua https).'); return false; }
+}
+function stopCam() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } video.style.display = 'none'; $('#camStart').textContent = 'Bật camera'; if (prev.hidden) $('#camEmpty').hidden = false; }
+video.style.display = 'none';
+$('#camStart').onclick = () => stream ? stopCam() : startCam();
+$('#shutter').onclick = async () => {
+  if (!stream) { await startCam(); return; }
+  const c = document.createElement('canvas'); await shrink(video, video.videoWidth, video.videoHeight, c);
+  stopCam(); analyze(c.toDataURL('image/jpeg', .82));
+};
+$('#fileIn').onchange = e => {
+  const file = e.target.files[0]; if (!file) return; e.target.value = '';
+  const img = new Image(); img.onload = async () => { const c = document.createElement('canvas'); await shrink(img, img.naturalWidth, img.naturalHeight, c); URL.revokeObjectURL(img.src); stopCam(); analyze(c.toDataURL('image/jpeg', .82)); };
+  img.onerror = () => toast('Không đọc được ảnh này.'); img.src = URL.createObjectURL(file);
+};
+async function shrink(src, w, h, c) { const s = Math.min(1, 768 / Math.max(w, h)); c.width = Math.round(w * s); c.height = Math.round(h * s); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); }
+$('#qtySeg').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $$('#qtySeg button').forEach(x => x.classList.toggle('on', x === b)); qtyM = +b.dataset.q; if (aiView) aiView.set(qtyM);
+});
+async function analyze(dataUrl) {
+  prev.src = dataUrl; prev.hidden = false; $('#camEmpty').hidden = true;
+  const out = $('#aiResult'); out.innerHTML = '<h3>Kết quả</h3><p><span class="spin"></span>AI đang nhận diện món ăn…</p>'; aiView = null;
+  try {
+    const r = await gemini([{ text: FOOD_PROMPT }, { inline_data: { mime_type: 'image/jpeg', data: dataUrl.split(',')[1] } }]);
+    if (!r.recognized) { out.innerHTML = '<h3>Kết quả</h3><p>Không nhận ra món ăn trong ảnh. Hãy chụp gần hơn, đủ sáng.</p>'; return; }
+    lastAI = toFood(r); out.innerHTML = '<h3>Kết quả</h3><div id="aiCard"></div>';
+    aiView = mountFood($('#aiCard'), lastAI, 'qty', qtyM);
+    const d = dayState(); if (!d.look.includes(lastAI.name) && d.look.length < 5) { d.look.push(lastAI.name); award(2, 'nhận diện món'); }
+  } catch (e) { out.innerHTML = `<h3>Kết quả</h3><div class="alert">${aiError(e)}</div>`; }
+}
+
+/* ================= Tính năng 4: thực đơn ================= */
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const safe = f => hits(f).length === 0;
+function pools() {
+  const base = FOODS.filter(f => !f.basic && f.region !== 'Hiện đại' && safe(f));
+  const sweet = /chè|bánh (cốm|khảo|đậu xanh|phu|tro|ít|thuẫn|in|bò|chuối|pía|da lợn|ống|gừng)|kẹo|mè xửng|sữa chua|rau câu|sương sáo|chuối nếp|khoai/i;
+  const bf = base.filter(f => /phở|bún|miến|bánh cuốn|xôi|cháo|bánh mì|bánh canh|hủ tiếu|bánh bèo|bánh giò|bánh đúc|mì quảng|bánh khúc|bánh hỏi|cao lầu/i.test(f.name) && f.kcal <= 560 && !/đậu mắm|giả cầy|bung/i.test(f.name));
+  const veg = base.filter(f => VEG_RE.test(f.name) && f.kcal <= 200 && !sweet.test(f.name));
+  const main = base.filter(f => /kho|luộc|nướng|xào|hấp|rim|chiên|gà|cá|sườn|thịt|bò|vịt|tôm|chả|đậu/i.test(f.name) && !bf.includes(f) && !veg.includes(f) && !sweet.test(f.name) && f.kcal <= 480 && f.protein >= 14 && !/lẩu|bánh|nem rán|nem chua|gà tần/i.test(f.name));
+  const fruit = BASICS.filter(f => f.basic === 'fruit' && safe(f));
+  const rice = BASICS[0];
+  return { bf, veg, main, fruit, rice };
+}
+function buildMenu() {
+  const T = target(), P = pools(), meals = [];
+  const split = [['Bữa sáng', .27], ['Bữa trưa', .40], ['Bữa tối', .33]];
+  split.forEach(([name, share], i) => {
+    let best = null;
+    for (let t = 0; t < 80; t++) {
+      let items;
+      if (i === 0) items = [{ f: pick(P.bf), m: 1 }, { f: pick(P.fruit), m: 1 }];
+      else items = [{ f: P.rice, m: 1 }, { f: pick(P.main), m: 1 }, { f: pick(P.veg), m: 1 }, { f: pick(P.fruit), m: 1 }];
+      if (items.some(x => !x.f)) continue;
+      // chỉnh khẩu phần cơm/món chính (S/M/L) cho sát mục tiêu bữa
+      const goal = T * share;
+      const tot = () => items.reduce((s, x) => s + x.f.kcal * x.m, 0);
+      for (const idx of (i === 0 ? [0] : [0, 1])) { let bm = 1, bd = Infinity; for (const m of [.7, 1, 1.3]) { items[idx].m = m; const d = Math.abs(tot() - goal); if (d < bd) { bd = d; bm = m; } } items[idx].m = bm; }
+      const diff = Math.abs(tot() - goal);
+      if (!best || diff < best.diff) best = { diff, items: items.map(x => ({ f: x.f, m: x.m })) };
+    }
+    meals.push({ name, items: best ? best.items : [] });
+  });
+  return meals;
+}
+function renderMenu() {
+  const out = $('#menuOut');
+  if (!S.menu) return;
+  const meals = S.menu.map(m => ({ name: m.name, items: m.items.map(x => ({ f: FOODS.find(f => String(f.id) === String(x.id)), m: x.m })).filter(x => x.f) }));
+  const T = target(), sum = (k) => meals.reduce((s, m) => s + m.items.reduce((a, x) => a + x.f[k] * x.m, 0), 0);
+  const all = meals.flatMap(m => m.items.map(x => x.f));
+  const groups = [['Bột đường', all.some(f => f.carb >= 30 || f.basic === 'rice')], ['Đạm', all.some(f => f.protein >= 14 || f.basic === 'protein')], ['Béo', all.some(f => f.fat >= 5)], ['Vitamin & khoáng', all.some(f => isVeg(f))]];
+  const sz = m => m === .7 ? 'S' : m === 1.3 ? 'L' : m === 1.6 ? 'XL' : 'M';
+  out.innerHTML = `<p>Mục tiêu: <b>${fmt(T)} kcal</b> · Thực đơn: <b>${fmt(sum('kcal'))} kcal</b> · Đạm ${fmt(sum('protein'))}g · Béo ${fmt(sum('fat'))}g · Carb ${fmt(sum('carb'))}g</p>
+    <div class="groups">${groups.map(([n, ok]) => `<span class="badge-tag ${ok ? '' : 'al'}">${ok ? '✔' : '✖'} ${n}</span>`).join('')}<span class="badge-tag">🥬 Có rau xanh</span><span class="badge-tag">🍊 Có trái cây</span></div>
+    ${myAllergens().length ? `<div class="ok">Đã loại các món chứa: ${myAllergens().map(esc).join(', ')}.</div>` : ''}
+    <div class="meals">${meals.map(m => `<div class="meal"><h4>${m.name}<small>${fmt(m.items.reduce((a, x) => a + x.f.kcal * x.m, 0))} kcal</small></h4><ul>${m.items.map(x => `<li>${esc(x.f.name)} <small class="muted">(${sz(x.m)} · ${fmt(x.f.kcal * x.m)} kcal)</small></li>`).join('')}</ul><button class="btn ghost" data-logmeal="${esc(m.name)}" style="margin-top:8px;padding:6px 10px">📒 Ghi vào nhật ký</button></div>`).join('')}</div>`;
+  $('#menuAgain').hidden = false; $('#menuGen').textContent = 'Tạo lại thực đơn';
+  $$('[data-logmeal]', out).forEach(b => b.onclick = () => { const m = meals.find(x => x.name === b.dataset.logmeal); const tag = m.name.replace('Bữa ', '').replace(/^./, c => c.toUpperCase()); m.items.forEach(x => addEntry(x.f, x.m, tag, true)); toast('Đã ghi ' + m.name.toLowerCase() + ' vào nhật ký'); });
+}
+function genMenu() {
+  const meals = buildMenu();
+  if (meals.some(m => !m.items.length)) return toast('Không đủ món phù hợp với hồ sơ dị ứng của bạn.');
+  S.menu = meals.map(m => ({ name: m.name, items: m.items.map(x => ({ id: x.f.id, m: x.m })) })); save(); renderMenu();
+}
+$('#menuGen').onclick = genMenu; $('#menuAgain').onclick = genMenu;
+
+/* ================= Tính năng 5: nhật ký ================= */
+let curDay = dayKey();
+function addEntry(f, m, meal, quiet) {
+  const hit = hits(f);
+  if (hit.length && !quiet && !confirm(`Món này chứa ${hit.join(', ')} — trùng hồ sơ dị ứng của bạn. Vẫn lưu vào nhật ký?`)) return;
+  const day = (S.diary[dayKey()] ??= []);
+  day.push({ id: Date.now() + Math.random(), name: f.name, kcal: round1(f.kcal * m), protein: round1(f.protein * m), fat: round1(f.fat * m), carb: round1(f.carb * m), m, meal, veg: isVeg(f), vegetable: isVegetable(f.name) || f.veg === true });
+  const d = dayState(); d.logs++;
+  const total = Object.values(S.diary).reduce((s, a) => s + a.length, 0); if (total >= 20) giveBadge('diary20');
+  checkHealthy(dayKey());
+  save(); if (!quiet) toast('Đã lưu vào nhật ký ✔');
+  if (d.logs <= 6) award(5, 'ghi nhật ký'); else save();
+  if (!$('#view-f5').hidden) renderDiary();
+}
+function checkHealthy(k) {
+  const es = S.diary[k] || [], kcal = es.reduce((s, e) => s + e.kcal, 0), t = target(), d = (S.daily[k] ??= { look: [], logs: 0, healthy: false });
+  if (!d.healthy && kcal >= .85 * t && kcal <= 1.15 * t && es.filter(e => e.veg).length >= 2) { d.healthy = true; giveBadge('healthy'); award(20, 'ngày ăn uống lành mạnh'); }
+}
+function renderDiary() {
+  $('#dDate').value = curDay;
+  const es = S.diary[curDay] || [], t = target();
+  const sum = k => es.reduce((s, e) => s + e[k], 0), kcal = sum('kcal');
+  drawDonut(kcal, t);
+  const tg = { carb: t * .55 / 4, protein: t * .15 / 4, fat: t * .30 / 9 };
+  const rows = [['Carb', 'carb', 'g'], ['Đạm (Protein)', 'protein', 'g'], ['Béo (Fat)', 'fat', 'g']];
+  $('#macroBars').innerHTML = rows.map(([n, k]) => { const v = sum(k), p = Math.min(100, v / tg[k] * 100); return `<div class="bar-row"><small><span>${n}</span><span>${fmt(v)} / ${fmt(tg[k])} g</span></small><div class="track"><i style="width:${p}%"></i></div></div>`; }).join('');
+  const adv = [], veg = es.filter(e => e.veg).length;
+  if (!es.length) adv.push('Hãy thêm món bạn đã ăn để nhận lời khuyên.');
+  else {
+    if (veg < 2) adv.push('Hôm nay bạn thiếu chất xơ — thêm rau xanh hoặc trái cây nhé.');
+    if (kcal < .7 * t) adv.push(`Mới nạp ${fmt(kcal / t * 100)}% nhu cầu năng lượng; đừng bỏ bữa.`);
+    if (kcal > 1.15 * t) adv.push('Bạn đã vượt mục tiêu calo; chọn món nhẹ hơn cho bữa sau.');
+    if (sum('protein') < .7 * tg.protein && kcal > .5 * t) adv.push('Lượng đạm còn thấp — thêm trứng, cá, thịt nạc hoặc đậu.');
+    if (sum('fat') > 1.25 * tg.fat) adv.push('Chất béo hơi cao — hạn chế đồ chiên rán.');
+    if (!adv.length) adv.push('Tuyệt vời! Khẩu phần hôm nay khá cân đối.');
+  }
+  $('#advice').innerHTML = `<h3>💡 Lời khuyên hôm nay</h3><ul class="advice">${adv.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
+  $('#entries').innerHTML = es.length ? es.map(e => `<li><div><b>${esc(e.name)}</b> <span class="badge-tag">${esc(e.meal)}</span><small>${fmt(e.kcal)} kcal · Đ ${fmt(e.protein, 1)}g · B ${fmt(e.fat, 1)}g · C ${fmt(e.carb, 1)}g</small></div><button data-del="${e.id}" aria-label="Xóa">✕</button></li>`).join('') : '<li class="muted">Chưa có món nào.</li>';
+}
+function drawDonut(v, t) {
+  const c = $('#donut'), x = c.getContext('2d'), W = c.width, cs = getComputedStyle(document.documentElement);
+  x.clearRect(0, 0, W, W); const r = W / 2 - 22, cx = W / 2, p = Math.min(v / t, 1);
+  x.lineWidth = 26; x.lineCap = 'round';
+  x.strokeStyle = cs.getPropertyValue('--line').trim(); x.beginPath(); x.arc(cx, cx, r, 0, 7); x.stroke();
+  if (v > 0) { x.strokeStyle = v > 1.15 * t ? '#dc2626' : v > t ? '#f59e0b' : cs.getPropertyValue('--brand').trim(); x.beginPath(); x.arc(cx, cx, r, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); x.stroke(); }
+  x.fillStyle = cs.getPropertyValue('--ink').trim(); x.textAlign = 'center'; x.font = '700 40px system-ui,sans-serif'; x.fillText(fmt(v), cx, cx + 8);
+  x.fillStyle = cs.getPropertyValue('--muted').trim(); x.font = '500 16px system-ui,sans-serif'; x.fillText(`/ ${fmt(t)} kcal`, cx, cx + 34);
+}
+$('#entries').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (!b) return; S.diary[curDay] = (S.diary[curDay] || []).filter(x => String(x.id) !== b.dataset.del); save(); renderDiary(); });
+$('#dDate').onchange = e => { curDay = e.target.value || dayKey(); renderDiary(); };
+$('#dPrev').onclick = () => { const d = new Date(curDay); d.setDate(d.getDate() - 1); curDay = dayKey(d); renderDiary(); };
+$('#dNext').onclick = () => { const d = new Date(curDay); d.setDate(d.getDate() + 1); curDay = dayKey(d); renderDiary(); };
+$('#diaryAdd').onclick = () => {
+  const f = FOODS.find(x => norm(x.name) === norm($('#diaryQ').value)) || searchFoods($('#diaryQ').value)[0];
+  if (!f) return toast('Không tìm thấy món này.');
+  const saved = dayKey; addEntryTo(curDay, f, +$('#diarySize').value, $('#diaryMeal').value); $('#diaryQ').value = '';
+};
+function addEntryTo(day, f, m, meal) { const real = dayKey(); if (day === real) return addEntry(f, m, meal); (S.diary[day] ??= []).push({ id: Date.now() + Math.random(), name: f.name, kcal: round1(f.kcal * m), protein: round1(f.protein * m), fat: round1(f.fat * m), carb: round1(f.carb * m), m, meal, veg: isVeg(f), vegetable: isVegetable(f.name) }); save(); renderDiary(); }
+$('#expBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify({ app: 'NutriFuture', version: 1, exported: new Date().toISOString(), state: { profile: S.profile, diary: S.diary, points: S.points, streak: S.streak, badges: S.badges, lookups: S.lookups, themes: S.themes, theme: S.theme } }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `nutrifuture-${dayKey()}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('#impIn').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text()); if (j.app !== 'NutriFuture' || !j.state) throw 0;
+    const s = j.state; if (typeof s.diary !== 'object') throw 0;
+    S = Object.assign(defState(), S, { profile: s.profile ?? S.profile, diary: s.diary, points: +s.points || 0, streak: s.streak || S.streak, badges: Array.isArray(s.badges) ? s.badges : [], lookups: Array.isArray(s.lookups) ? s.lookups : [], themes: Array.isArray(s.themes) ? s.themes : ['default'], theme: s.theme || 'default' });
+    save(); applyTheme(); header(); renderDiary(); toast('Đã khôi phục dữ liệu ✔');
+  } catch (err) { toast('File JSON không hợp lệ.'); }
+};
+
+/* ================= Tính năng 6: gamification ================= */
+const QBANK = [
+  [1, 'Nhóm chất nào là nguồn năng lượng chính của cơ thể?', ['Chất bột đường (carb)', 'Vitamin', 'Chất khoáng', 'Nước'], 0, 'Carbohydrate cung cấp phần lớn năng lượng cho cơ thể.'],
+  [1, 'Một người trưởng thành nên uống khoảng bao nhiêu nước mỗi ngày?', ['200 ml', '1,5–2 lít', '5 lít', 'Chỉ khi khát'], 1, 'Khoảng 1,5–2 lít (tùy cân nặng, thời tiết, vận động).'],
+  [1, 'Thực phẩm nào giàu chất đạm?', ['Kẹo', 'Trứng', 'Nước ngọt', 'Mỡ heo'], 1, 'Trứng, thịt, cá, đậu là nguồn đạm tốt.'],
+  [1, 'Rau xanh chủ yếu cung cấp gì?', ['Chất xơ và vitamin', 'Chỉ có đường', 'Chỉ có mỡ', 'Không có gì'], 0, 'Rau cung cấp chất xơ, vitamin và khoáng chất.'],
+  [1, 'Bữa nào không nên bỏ để có đủ năng lượng học tập?', ['Bữa sáng', 'Không bữa nào', 'Chỉ bữa khuya', 'Bữa vặt'], 0, 'Bữa sáng giúp tỉnh táo, tập trung.'],
+  [2, '1 gram chất béo cung cấp khoảng bao nhiêu kcal?', ['4 kcal', '7 kcal', '9 kcal', '2 kcal'], 2, 'Béo 9 kcal/g; đạm và carb đều 4 kcal/g.'],
+  [2, 'Chất dinh dưỡng nào giúp xây dựng và sửa chữa cơ bắp?', ['Protein', 'Muối', 'Đường', 'Nước đá'], 0, 'Protein là “viên gạch” của cơ bắp.'],
+  [2, 'Canxi và vitamin D quan trọng nhất cho bộ phận nào?', ['Xương', 'Tóc', 'Móng tay', 'Mắt'], 0, 'Chúng giúp xương chắc khỏe, rất cần khi dậy thì.'],
+  [2, 'Vitamin C có nhiều trong…', ['Cam, ổi', 'Mỡ lợn', 'Muối', 'Đường'], 0, 'Cam, ổi, bưởi, ớt chuông giàu vitamin C.'],
+  [2, 'Chỉ số BMI được tính bằng công thức nào?', ['Cân nặng (kg) / chiều cao² (m)', 'Chiều cao / cân nặng', 'Cân nặng × chiều cao', 'Tuổi / cân nặng'], 0, 'BMI = kg / m².'],
+  [2, 'Thiếu sắt lâu ngày dễ gây ra tình trạng nào?', ['Thiếu máu', 'Cao lên nhanh', 'Béo phì', 'Sâu răng'], 0, 'Sắt cần để tạo hồng cầu.'],
+  [2, 'Cách chế biến nào thường ít béo nhất?', ['Luộc, hấp', 'Chiên ngập dầu', 'Rán giòn', 'Xào nhiều mỡ'], 0, 'Luộc, hấp, nướng ít dầu giúp giảm béo.'],
+  [3, 'Chất xơ có lợi chính nào sau đây?', ['Hỗ trợ tiêu hóa, no lâu', 'Tăng cholesterol', 'Cung cấp nhiều calo', 'Phá hủy vitamin'], 0, 'Chất xơ giúp nhu động ruột tốt và no lâu.'],
+  [3, 'Với người dị ứng đậu phộng, nên làm gì?', ['Đọc kỹ thành phần, tránh hoàn toàn', 'Ăn một ít để quen', 'Chỉ tránh khi ăn nhiều', 'Không cần quan tâm'], 0, 'Dị ứng có thể nguy hiểm, cần tránh hoàn toàn và đọc nhãn.'],
+  [3, 'Theo khuyến nghị chung, năng lượng từ chất béo nên chiếm khoảng bao nhiêu % tổng calo?', ['20–35%', '70–80%', '0%', '50–60%'], 0, 'Khoảng 20–35% tổng năng lượng.'],
+  [3, 'Vì sao nên hạn chế đồ uống có đường (trà sữa, nước ngọt)?', ['Nhiều calo “rỗng”, dễ thừa cân, sâu răng', 'Chứa quá nhiều chất xơ', 'Làm cao nhanh', 'Giàu đạm'], 0, 'Đường tự do cho năng lượng cao nhưng ít dưỡng chất.'],
+  [3, 'Omega-3 có nhiều trong…', ['Cá béo (cá hồi, cá thu)', 'Bánh kẹo', 'Nước ngọt', 'Cơm trắng'], 0, 'Cá béo cung cấp omega-3 tốt cho tim mạch và não.'],
+  [3, 'Chỉ số “khẩu phần” S/M/L trong NutriFuture dùng để…', ['Điều chỉnh lượng calo theo phần ăn thực tế', 'Đổi tên món', 'Xóa nhật ký', 'Tăng điểm'], 0, 'Lượng dinh dưỡng được nhân theo 70% / 100% / 130%.'],
+];
+function seedRand(seed) { let h = 2166136261; for (const c of seed) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 10000) / 10000; }; }
+function localQuiz(k) {
+  const R = seedRand(k + (S.quiz?.gen || 0)), by = d => QBANK.filter(q => q[0] === d).sort(() => R() - .5);
+  const sel = [...by(1).slice(0, 2), ...by(2).slice(0, 2), ...by(3).slice(0, 1)];
+  return sel.map(q => ({ d: q[0], q: q[1], o: q[2], a: q[3], e: q[4] }));
+}
+async function ensureQuiz(force) {
+  const k = dayKey();
+  if (!force && S.quiz && S.quiz.date === k) return;
+  const gen = force ? (S.quiz?.gen || 0) + 1 : 0;
+  let qs = null, src = 'bộ câu hỏi có sẵn';
+  if (getKey()) {
+    $('#quiz').innerHTML = '<p><span class="spin"></span>AI đang tạo 5 câu đố mới…</p>';
+    try {
+      const r = await gemini([{ text: `Tạo 5 câu hỏi trắc nghiệm tiếng Việt về dinh dưỡng cho học sinh THPT, độ khó tăng dần từ dễ đến khó (d=1,1,2,2,3). Chủ đề đa dạng, mỗi lần khác nhau (mã ngẫu nhiên: ${Math.random().toString(36).slice(2, 8)}). Chỉ trả JSON dạng mảng: [{"d":1,"q":"câu hỏi","o":["A","B","C","D"],"a":0,"e":"giải thích ngắn"}] với a là chỉ số đáp án đúng (0-3), đúng 4 lựa chọn, chỉ một đáp án đúng, thông tin khoa học chính xác.` }]);
+      if (Array.isArray(r) && r.length >= 5 && r.every(x => x.q && Array.isArray(x.o) && x.o.length === 4 && Number.isInteger(x.a) && x.a >= 0 && x.a < 4)) { qs = r.slice(0, 5).map((x, i) => ({ d: x.d || [1, 1, 2, 2, 3][i], q: String(x.q), o: x.o.map(String), a: x.a, e: String(x.e || '') })); src = 'tạo bởi AI Gemini'; }
+    } catch (e) { /* dùng bộ có sẵn */ }
+  }
+  S.quiz = { date: k, gen, src, qs: qs || localQuiz(k), ans: [null, null, null, null, null] }; save();
+}
+async function renderGame() {
+  const wk = weeklyInfo();
+  $('#gameStats').innerHTML = `<div class="kpi"><small>Điểm thưởng</small><b>⭐ ${fmt(S.points)}</b></div><div class="kpi"><small>Chuỗi ngày</small><b>🔥 ${S.streak.n}</b></div><div class="kpi"><small>Huy hiệu</small><b>🏅 ${S.badges.length}/${BADGES.length}</b></div>`;
+  $('#weekly').innerHTML = `<p><b>Ăn 5 loại rau củ khác nhau</b> trong tuần này.</p><div class="track"><i style="width:${Math.min(100, wk.n / 5 * 100)}%"></i></div><p class="muted">${wk.n}/5 loại${wk.list.length ? ': ' + wk.list.map(esc).join(', ') : ''}${wk.done ? ' · 🎉 Hoàn thành (+50 điểm)' : ''}</p>`;
+  $('#badges').innerHTML = BADGES.map(b => `<div class="bdg ${S.badges.includes(b.id) ? '' : 'off'}"><span class="e">${b.e}</span><b>${esc(b.n)}</b><small>${esc(b.d)}</small></div>`).join('');
+  const TH = [['default', 'Xanh lá', '#16a34a', 0], ['sunset', 'Hoàng hôn', '#ea580c', 100], ['ocean', 'Đại dương', '#0284c7', 200], ['grape', 'Nho tím', '#7c3aed', 300]];
+  $('#themes').innerHTML = TH.map(([id, n, c, cost]) => { const own = S.themes.includes(id); return `<button class="theme ${S.theme === id ? 'on' : ''}" data-theme="${id}" data-cost="${cost}"><i style="background:${c}"></i>${n}${own ? '' : ` · 🔒 ${cost}⭐`}</button>`; }).join('');
+  await ensureQuiz(false); renderQuiz();
+}
+function renderQuiz() {
+  const q = S.quiz; if (!q) return;
+  $('#quizSrc').textContent = '· ' + q.src;
+  const done = q.ans.every(a => a !== null), score = q.qs.reduce((s, x, i) => s + (q.ans[i] === x.a ? 1 : 0), 0);
+  $('#quiz').innerHTML = q.qs.map((x, i) => `<div class="q"><small>Câu ${i + 1} · ${['', 'Dễ', 'Vừa', 'Khó'][x.d] || 'Vừa'}</small><div><b>${esc(x.q)}</b></div><div class="opts">${x.o.map((o, j) => { const a = q.ans[i]; const cls = a === null ? '' : j === x.a ? 'right' : j === a ? 'wrong' : ''; return `<button data-q="${i}" data-o="${j}" class="${cls}" ${a !== null ? 'disabled' : ''}>${esc(o)}</button>`; }).join('')}</div>${q.ans[i] !== null && x.e ? `<small>💬 ${esc(x.e)}</small>` : ''}</div>`).join('')
+    + (done ? `<div class="ok">Kết quả: ${score}/5 ${score === 5 ? '🎉' : ''}</div><button class="btn ghost" id="newQuiz">🔄 Bộ câu hỏi mới${getKey() ? ' (AI)' : ''}</button>` : '');
+}
+$('#quiz').addEventListener('click', async e => {
+  if (e.target.id === 'newQuiz') { await ensureQuiz(true); return renderQuiz(); }
+  const b = e.target.closest('[data-q]'); if (!b) return;
+  const i = +b.dataset.q, j = +b.dataset.o, q = S.quiz; if (q.ans[i] !== null) return;
+  q.ans[i] = j; save();
+  if (j === q.qs[i].a) award(10, 'trả lời đúng');
+  if (q.ans.every(a => a !== null) && q.qs.every((x, n) => q.ans[n] === x.a)) { giveBadge('quiz'); }
+  renderQuiz(); renderGameStatsOnly();
+});
+function renderGameStatsOnly() { $('#gameStats').innerHTML = `<div class="kpi"><small>Điểm thưởng</small><b>⭐ ${fmt(S.points)}</b></div><div class="kpi"><small>Chuỗi ngày</small><b>🔥 ${S.streak.n}</b></div><div class="kpi"><small>Huy hiệu</small><b>🏅 ${S.badges.length}/${BADGES.length}</b></div>`; }
+function weeklyInfo() {
+  const now = new Date(), dow = (now.getDay() + 6) % 7, mon = new Date(now); mon.setDate(now.getDate() - dow);
+  const wkKey = dayKey(mon), set = new Set();
+  for (let i = 0; i < 7; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); (S.diary[dayKey(d)] || []).filter(e => e.vegetable).forEach(e => set.add(e.name)); }
+  const done = set.size >= 5;
+  if (done && !S.weeklyDone[wkKey]) { S.weeklyDone[wkKey] = true; save(); award(50, 'hoàn thành thử thách tuần'); }
+  return { n: Math.min(set.size, 99), list: [...set], done: done || !!S.weeklyDone[wkKey] };
+}
+$('#themes').addEventListener('click', e => {
+  const b = e.target.closest('.theme'); if (!b) return;
+  const id = b.dataset.theme, cost = +b.dataset.cost;
+  if (!S.themes.includes(id)) { if (S.points < cost) return toast(`Cần ${cost} điểm để mở khóa (bạn có ${S.points}).`); S.points -= cost; S.themes.push(id); header(); }
+  S.theme = id; save(); applyTheme(); renderGame();
+});
+function applyTheme() { if (S.theme && S.theme !== 'default') document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; }
+
+/* ================= Cài đặt AI ================= */
+$('#settingsBtn').onclick = () => { $('#keyIn').value = getKey(); $('#modelIn').value = getModel(); $('#settings').showModal(); };
+$('#saveKey').onclick = () => { try { localStorage.setItem('nf_key', $('#keyIn').value.trim()); localStorage.setItem('nf_model', $('#modelIn').value.trim()); sessionStorage.removeItem('nf_okmodel'); } catch (e) { /* */ } toast('Đã lưu cài đặt AI'); renderSuggest(); };
+
+/* ================= Khởi động ================= */
+applyTheme(); touchStreak(); header(); renderSuggest();
+show(location.hash.slice(1) || 'home');
